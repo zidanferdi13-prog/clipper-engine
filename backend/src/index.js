@@ -3,7 +3,7 @@ const { createServer } = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 
 const connectDB = require('./config/database');
 const logger = require('./config/logger');
