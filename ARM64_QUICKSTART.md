@@ -4,16 +4,28 @@
 
 ### For Raspberry Pi (Exit Code 159 Fix)
 
+**Option 1: No BuildKit (RECOMMENDED for Raspberry Pi)**
+```bash
+# Disable BuildKit completely
+chmod +x build-raspi-no-buildkit.sh
+./build-raspi-no-buildkit.sh
+```
+
+**Option 2: Manual Installation (No Docker)**
+```bash
+# Install tanpa Docker jika build tetap fail
+chmod +x install-manual.sh
+./install-manual.sh
+
+# Start services
+sudo systemctl start clipper-backend clipper-worker clipper-frontend
+```
+
+**Option 3: Original Build**
 ```bash
 # Use optimized config untuk Raspberry Pi
 sudo docker compose -f docker-compose.raspi.yml build
 sudo docker compose -f docker-compose.raspi.yml up -d
-
-# Check status
-sudo docker compose -f docker-compose.raspi.yml ps
-
-# View logs
-sudo docker compose -f docker-compose.raspi.yml logs -f
 ```
 
 ### For Other ARM64 Linux (Server/VM)

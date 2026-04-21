@@ -3,11 +3,65 @@
 ## Problem: Exit Code 159
 
 Exit code 159 pada Raspberry Pi disebabkan oleh:
-- Segmentation fault saat build
+- Segmentation fault saat build (even for simple commands like `apk add ffmpeg`)
+- Docker BuildKit incompatibility dengan ARM64
 - Memory limitation (especially Pi 4GB or less)
-- Docker BuildKit issue dengan Alpine packages
 
-## ✅ Solution: Automated Build Script (EASIEST)
+## ✅ Solution 1: Disable BuildKit (RECOMMENDED)
+
+BuildKit sering crash di Raspberry Pi. Gunakan legacy builder:
+
+```bash
+# Di Raspberry Pi
+cd /var/www/clipper-engine
+
+# Pull latest code
+sudo git pull origin main
+
+# Make script executable
+chmod +x build-raspi-no-buildkit.sh
+
+# Run build WITHOUT BuildKit
+./build-raspi-no-buildkit.sh
+```
+
+**Script akan:**
+- ✅ Disable Docker BuildKit
+- ✅ Pull base images
+- ✅ Build dengan legacy Docker builder
+- ✅ Start all services
+
+## ✅ Solution 2: Manual Installation (No Docker)
+
+Kalau Docker build tetap gagal, install manual tanpa Docker:
+
+```bash
+# Install manual tanpa Docker
+chmod +x install-manual.sh
+./install-manual.sh
+```
+
+**Manual installation:**
+- ✅ Install Node.js, MongoDB, Redis, FFmpeg directly
+- ✅ Install npm dependencies
+- ✅ Create systemd services
+- ✅ No Docker required!
+
+**Start services:**
+```bash
+sudo systemctl start clipper-backend
+sudo systemctl start clipper-worker
+sudo systemctl start clipper-frontend
+```
+
+**Enable auto-start:**
+```bash
+sudo systemctl enable clipper-backend
+sudo systemctl enable clipper-worker
+sudo systemctl enable clipper-frontend
+```
+
+## ✅ Solution 3: Automated Build Script (Original)
 
 ### Quick Start
 
