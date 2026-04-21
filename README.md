@@ -4,32 +4,31 @@ AI-powered video clipper yang otomatis memotong video panjang jadi short-form vi
 
 ## 🚀 Quick Start (Docker)
 
-### 1. Prerequisites
-- Docker Desktop for Windows
-- OpenAI API Key ([Get here](https://platform.openai.com/api-keys))
-
-### 2. Setup
+### Windows
 
 ```bash
-# Clone repository
-git clone https://github.com/zidanferdi13-prog/clipper-engine.git
-cd clipper-engine
+# Double-click start.bat or run in terminal:
+start.bat
+```
 
-# Copy .env and add your OPENAI_API_KEY
-copy .env.example .env
-notepad .env
+### Linux/Mac
+
+```bash
+# Setup environment
+cp .env.example .env
+nano .env  # Add your OPENAI_API_KEY
 
 # Build and run
 docker-compose build
 docker-compose up -d
 ```
 
-### 3. Access
+### Access
 
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:5000
 
-**See [DOCKER.md](DOCKER.md) for detailed Docker guide**
+**See [DOCKER.md](DOCKER.md) for detailed guide**
 
 ---
 
