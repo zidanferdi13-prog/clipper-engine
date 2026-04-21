@@ -5,7 +5,6 @@ const logger = require('../config/logger');
 const { Job } = require('../models');
 const downloadService = require('../services/download.service');
 const eventEmitter = require('../services/event-emitter.service');
-const eventEmitter = require('../services/event-emitter.service');
 
 class DownloadWorker {
   constructor() {

@@ -207,11 +207,6 @@ exports.refreshToken = async (req, res) => {
     await user.save();
 
     logger.info(`Token refreshed for user: ${user.email}`);
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
-    
-    // Generate new tokens
-    const newToken = generateToken(decoded.userId);
-    const newRefreshToken = generateRefreshToken(decoded.userId);
 
     res.json({
       success: true,

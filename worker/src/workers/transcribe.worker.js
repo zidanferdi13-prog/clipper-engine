@@ -4,7 +4,6 @@ const logger = require('../config/logger');
 const { Job } = require('../models');
 const transcribeService = require('../services/transcribe.service');
 const eventEmitter = require('../services/event-emitter.service');
-const eventEmitter = require('../services/event-emitter.service');
 
 class TranscribeWorker {
   constructor() {
