@@ -19,6 +19,9 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^1.4.1"
   },
+  "optionalDependencies": {
+    "ytdl-core": "^4.11.5"
+  },
   "devDependencies": {
     "nodemon": "^3.0.2"
   }

@@ -1,0 +1,32 @@
+# Lightweight Dockerfile untuk Raspberry Pi ARM64
+# Menggunakan ytdl-core (npm) instead of yt-dlp (python) untuk reduce memory
+
+FROM node:18-alpine
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+WORKDIR /app
+
+# Install ONLY FFmpeg - skip Python completely
+# ytdl-core npm package will handle YouTube downloads
+RUN apk add --no-cache ffmpeg
+
+# Install Node dependencies FIRST (better caching)
+COPY package*.json ./
+
+# Add ytdl-core untuk replace yt-dlp
+RUN npm install --prefer-offline --no-audit && \
+    npm install ytdl-core@latest --save
+
+# Copy source code
+COPY . .
+
+# Create storage directories
+RUN mkdir -p /app/storage/raw \
+             /app/storage/audio \
+             /app/storage/clips \
+             /app/storage/thumbnails \
+             /app/storage/temp
+
+CMD ["npm", "run", "dev"]

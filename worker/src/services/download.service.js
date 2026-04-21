@@ -2,9 +2,23 @@ const { exec } = require('child_process');
 const util = require('util');
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const logger = require('../config/logger');
 
 const execPromise = util.promisify(exec);
+
+// Check if USE_YTDL_CORE environment variable is set (for Raspberry Pi)
+const USE_YTDL_CORE = process.env.USE_YTDL_CORE === 'true';
+let ytdl;
+
+if (USE_YTDL_CORE) {
+  try {
+    ytdl = require('ytdl-core');
+    logger.info('Using ytdl-core for video downloads (Raspberry Pi mode)');
+  } catch (error) {
+    logger.warn('ytdl-core not found, falling back to yt-dlp');
+  }
+}
 
 class DownloadService {
   constructor() {
@@ -23,15 +37,11 @@ class DownloadService {
 
       logger.info(`Downloading video from: ${url}`);
 
-      // Download with yt-dlp
-      const command = `yt-dlp -f "best[ext=mp4]" -o "${outputPath}" "${url}"`;
-      
-      const { stdout, stderr } = await execPromise(command, {
-        timeout: 300000 // 5 minutes timeout
-      });
-
-      if (stderr) {
-        logger.warn('yt-dlp stderr:', stderr);
+      // Choose download method based on environment
+      if (USE_YTDL_CORE && ytdl) {
+        await this.downloadWithYtdlCore(url, outputPath);
+      } else {
+        await this.downloadWithYtDlp(url, outputPath);
       }
 
       // Get video metadata
@@ -53,6 +63,44 @@ class DownloadService {
     } catch (error) {
       logger.error('Download error:', error);
       throw new Error(`Failed to download video: ${error.message}`);
+    }
+  }
+
+  async downloadWithYtdlCore(url, outputPath) {
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Using ytdl-core for download');
+        
+        ytdl(url, {
+          quality: 'highestvideo',
+          filter: format => format.container === 'mp4'
+        })
+          .pipe(fsSync.createWriteStream(outputPath))
+          .on('finish', () => {
+            logger.info('ytdl-core download completed');
+            resolve();
+          })
+          .on('error', (error) => {
+            logger.error('ytdl-core download error:', error);
+            reject(error);
+          });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async downloadWithYtDlp(url, outputPath) {
+    logger.info('Using yt-dlp for download');
+    
+    const command = `yt-dlp -f "best[ext=mp4]" -o "${outputPath}" "${url}"`;
+    
+    const { stdout, stderr } = await execPromise(command, {
+      timeout: 300000 // 5 minutes timeout
+    });
+
+    if (stderr) {
+      logger.warn('yt-dlp stderr:', stderr);
     }
   }
 
