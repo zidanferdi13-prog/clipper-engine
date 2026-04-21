@@ -1,5 +1,69 @@
 # Windows Development Notes
 
+## Quick Setup (First Time)
+
+```powershell
+# Run setup script
+.\setup-windows.bat
+```
+
+**Script akan:**
+1. Create `.env` file dari `.env.example`
+2. Open Notepad untuk edit `.env`
+3. Start MongoDB & Redis via Docker
+4. Install semua npm dependencies
+
+**IMPORTANT:** Tambahkan `OPENAI_API_KEY` di file `.env`:
+```env
+OPENAI_API_KEY=sk-your-actual-api-key-here
+```
+
+Get API key dari: https://platform.openai.com/api-keys
+
+---
+
+## Manual Setup
+
+### 1. Create .env File
+
+```powershell
+# Copy example file
+Copy-Item .env.example .env
+
+# Edit dengan notepad
+notepad .env
+```
+
+**Tambahkan OPENAI_API_KEY:**
+```env
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxx
+```
+
+### 2. Start Infrastructure
+
+```powershell
+docker-compose up -d mongo redis
+```
+
+### 3. Install Dependencies
+
+```powershell
+# Backend
+cd backend
+npm install
+
+# Worker
+cd ..\worker
+npm install
+npm install ytdl-core
+
+# Frontend
+cd ..\frontend
+npm install
+```
+
+---
+
 ## Known Issues & Solutions
 
 ### 1. Next.js EPERM Error (.next/trace)
