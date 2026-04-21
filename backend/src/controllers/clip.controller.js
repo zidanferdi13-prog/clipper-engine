@@ -2,12 +2,29 @@ const Clip = require('../models/Clip');
 const Job = require('../models/Job');
 const logger = require('../config/logger');
 
+// Helper: convert internal /app/storage/... path → public HTTP URL
+function toPublicUrl(filePath) {
+  if (!filePath) return null;
+  const base = (process.env.STORAGE_PATH || '/app/storage').replace(/\/$/, '');
+  const apiUrl = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`);
+  // Replace the storage prefix with the public /storage route
+  return filePath.replace(base, `${apiUrl}/storage`);
+}
+
+function serializeClip(clip) {
+  const obj = clip.toObject ? clip.toObject() : { ...clip };
+  obj.fileUrl      = toPublicUrl(obj.fileUrl);
+  obj.thumbnailUrl = toPublicUrl(obj.thumbnailUrl);
+  obj.subtitleUrl  = toPublicUrl(obj.subtitleUrl);
+  return obj;
+}
+
 // Get Clip by ID
 exports.getClipById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const clip = await Clip.findById(id).populate('jobId', 'userId');
+    const clip = await Clip.findById(id);
 
     if (!clip) {
       return res.status(404).json({
@@ -16,8 +33,9 @@ exports.getClipById = async (req, res) => {
       });
     }
 
-    // Check ownership
-    if (clip.jobId.userId.toString() !== req.user.userId) {
+    // Check ownership via related Job
+    const job = await Job.findById(clip.jobId);
+    if (!job || job.userId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'
@@ -26,7 +44,7 @@ exports.getClipById = async (req, res) => {
 
     res.json({
       success: true,
-      data: { clip }
+      data: { clip: serializeClip(clip) }
     });
 
   } catch (error) {
@@ -53,12 +71,13 @@ exports.getClipsByJobId = async (req, res) => {
       });
     }
 
-    const clips = await Clip.find({ jobId }).sort({ score: -1 });
+    // jobId stored as plain string by worker (strict:false schema)
+    const clips = await Clip.find({ jobId: String(jobId) }).sort({ score: -1 });
 
     res.json({
       success: true,
       data: {
-        clips,
+        clips: clips.map(serializeClip),
         total: clips.length
       }
     });
@@ -78,7 +97,7 @@ exports.deleteClip = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const clip = await Clip.findById(id).populate('jobId', 'userId');
+    const clip = await Clip.findById(id);
 
     if (!clip) {
       return res.status(404).json({
@@ -87,8 +106,9 @@ exports.deleteClip = async (req, res) => {
       });
     }
 
-    // Check ownership
-    if (clip.jobId.userId.toString() !== req.user.userId) {
+    // Check ownership via related Job
+    const job = await Job.findById(clip.jobId);
+    if (!job || job.userId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
         message: 'Access denied'

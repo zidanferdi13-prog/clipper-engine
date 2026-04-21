@@ -5,8 +5,8 @@ import { useWebSocket } from './useWebSocket';
 import toast from 'react-hot-toast';
 
 export function useJobProgress(jobId) {
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('pending');
+  const [progress, setProgress] = useState(null);   // null = no WS update yet
+  const [status, setStatus] = useState(null);        // null = no WS update yet
   const [message, setMessage] = useState('');
   const { on } = useWebSocket();
 
@@ -27,17 +27,18 @@ export function useJobProgress(jobId) {
       if (data.jobId === jobId) {
         setProgress(100);
         setStatus('completed');
-        setMessage(`Job completed! ${data.clipsCount} clips generated.`);
-        toast.success(`Job completed! ${data.clipsCount} clips ready to download.`);
+        setMessage(`✅ ${data.clipsCount} clips siap didownload!`);
+        toast.success(`Job selesai! ${data.clipsCount} clips siap.`);
       }
     });
 
     // Listen for job failed
     const unsubFailed = on('job:failed', (data) => {
       if (data.jobId === jobId) {
+        setProgress(prev => prev);
         setStatus('failed');
         setMessage(data.error);
-        toast.error(`Job failed: ${data.error}`);
+        toast.error(`Job gagal: ${data.error}`);
       }
     });
 

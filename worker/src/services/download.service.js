@@ -23,6 +23,11 @@ if (USE_YTDL_CORE) {
 class DownloadService {
   constructor() {
     this.storageDir = process.env.STORAGE_PATH || './storage';
+    this.ytDlpMaxRetries = parseInt(process.env.YTDLP_MAX_RETRIES || '3', 10);
+    this.ytDlpRetryDelayMs = parseInt(process.env.YTDLP_RETRY_DELAY_MS || '3000', 10);
+    this.ytDlpTimeoutMs = parseInt(process.env.YTDLP_TIMEOUT_MS || '300000', 10);
+    this.ytDlpCookiesPath = process.env.YTDLP_COOKIES_PATH || '';
+    this.ytDlpProxy = process.env.YTDLP_PROXY_URL || '';
   }
 
   async downloadVideo(url, jobId) {
@@ -92,16 +97,138 @@ class DownloadService {
 
   async downloadWithYtDlp(url, outputPath) {
     logger.info('Using yt-dlp for download');
-    
-    const command = `yt-dlp -f "best[ext=mp4]" -o "${outputPath}" "${url}"`;
-    
-    const { stdout, stderr } = await execPromise(command, {
-      timeout: 300000 // 5 minutes timeout
-    });
 
-    if (stderr) {
-      logger.warn('yt-dlp stderr:', stderr);
+    const normalizedUrl = this.normalizeUrl(url);
+    let lastError;
+
+    for (let attempt = 1; attempt <= this.ytDlpMaxRetries; attempt++) {
+      const command = await this.buildYtDlpCommand(normalizedUrl, outputPath);
+
+      try {
+        const { stderr } = await execPromise(command, {
+          timeout: this.ytDlpTimeoutMs,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+
+        if (stderr) {
+          logger.warn('yt-dlp stderr:', stderr);
+        }
+
+        return;
+      } catch (error) {
+        lastError = error;
+        const stderr = error?.stderr || error?.message || '';
+
+        if (this.isBotProtectionError(stderr)) {
+          throw new Error(
+            'YouTube meminta verifikasi bot. Tambahkan cookies YouTube ke worker (YTDLP_COOKIES_PATH) atau coba lagi beberapa menit.'
+          );
+        }
+
+        const retryable = this.isRetryableDownloadError(stderr);
+        const hasNextAttempt = attempt < this.ytDlpMaxRetries;
+
+        if (!retryable || !hasNextAttempt) {
+          break;
+        }
+
+        const delay = this.ytDlpRetryDelayMs * attempt;
+        logger.warn(`yt-dlp attempt ${attempt}/${this.ytDlpMaxRetries} failed. Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
+
+    throw new Error(this.formatYtDlpError(lastError));
+  }
+
+  normalizeUrl(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes('youtube.com')) {
+        parsed.searchParams.delete('t');
+        parsed.searchParams.delete('si');
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  async buildYtDlpCommand(url, outputPath) {
+    const args = [
+      'yt-dlp',
+      '--no-progress',
+      '--newline',
+      '--retries', '5',
+      '--fragment-retries', '5',
+      '--extractor-retries', '5',
+      '--socket-timeout', '30',
+      '--sleep-requests', '1',
+      '--min-sleep-interval', '1',
+      '--max-sleep-interval', '5',
+      '--js-runtimes', 'node',
+      // ios and web clients work without PO Token; android requires GVS PO Token (avoid)
+      '--extractor-args', '"youtube:player_client=ios,web,mweb"',
+      // Permissive selector: best video+audio, fallback to best single file, remux to mp4
+      '-f', '"bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best"',
+      '--merge-output-format', 'mp4',
+    ];
+
+    if (this.ytDlpProxy) {
+      args.push('--proxy', `"${this.ytDlpProxy}"`);
+    }
+
+    if (await this.cookiesFileExists()) {
+      args.push('--cookies', `"${this.ytDlpCookiesPath}"`);
+    }
+
+    args.push('-o', `"${outputPath}"`, `"${url}"`);
+    return args.join(' ');
+  }
+
+  async cookiesFileExists() {
+    if (!this.ytDlpCookiesPath) return false;
+    try {
+      await fs.access(this.ytDlpCookiesPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  isBotProtectionError(stderr) {
+    const msg = String(stderr || '').toLowerCase();
+    return (
+      msg.includes('sign in to confirm you’re not a bot') ||
+      msg.includes('sign in to confirm you\'re not a bot') ||
+      msg.includes('use --cookies')
+    );
+  }
+
+  isRetryableDownloadError(stderr) {
+    const msg = String(stderr || '').toLowerCase();
+    return (
+      msg.includes('http error 429') ||
+      msg.includes('http error 403') ||
+      msg.includes('too many requests') ||
+      msg.includes('timed out') ||
+      msg.includes('temporary failure') ||
+      msg.includes('connection reset') ||
+      msg.includes('unable to download webpage')
+    );
+  }
+
+  formatYtDlpError(error) {
+    const stderr = error?.stderr || '';
+    if (stderr) {
+      const lines = stderr.split('\n').map(line => line.trim());
+      // Prefer actual ERROR lines over WARNING lines
+      const errorLine   = lines.find(l => l.startsWith('ERROR:'));
+      const warningLine = lines.find(l => l.startsWith('WARNING:') && !l.includes('po_token') && !l.includes('PO Token'));
+      const picked = errorLine || warningLine;
+      if (picked) return `yt-dlp failed: ${picked}`;
+    }
+    return error?.message || 'yt-dlp download failed';
   }
 
   async getVideoDuration(videoPath) {

@@ -1,6 +1,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const logger = require('../config/logger');
+const { analyzeQueue } = require('../config/queue');
 const { Job } = require('../models');
 const transcribeService = require('../services/transcribe.service');
 const eventEmitter = require('../services/event-emitter.service');
@@ -62,7 +63,6 @@ class TranscribeWorker {
       });
 
       // Add to analyze queue
-      const { analyzeQueue } = require('../../backend/src/config/queue');
       await analyzeQueue.add('analyze-content', {
         jobId,
         transcript,

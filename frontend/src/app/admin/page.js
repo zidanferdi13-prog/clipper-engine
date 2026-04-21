@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import api from '../../../lib/api';
+import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
 export default function AdminDashboard() {

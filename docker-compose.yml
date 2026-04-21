@@ -1,7 +1,13 @@
 version: '3.8'
 
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
-  # MongoDB Database
+  # ─── MongoDB ─────────────────────────────────────────────────────────────────
   mongo:
     image: mongo:7
     container_name: clipper-mongo
@@ -15,20 +21,35 @@ services:
       - mongo_data:/data/db
     networks:
       - clipper-network
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
-  # Redis Queue
+  # ─── Redis ───────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: clipper-redis
     restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save 60 1
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - clipper-network
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
-  # Backend API
+  # ─── Backend API ─────────────────────────────────────────────────────────────
   api:
     build:
       context: ./backend
@@ -43,11 +64,12 @@ services:
       MONGODB_URI: mongodb://admin:clipper_secret_2024@mongo:27017/clipper?authSource=admin
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       STORAGE_PATH: /app/storage
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:5000}
     depends_on:
       - mongo
       - redis
@@ -55,8 +77,15 @@ services:
       - storage_data:/app/storage
     networks:
       - clipper-network
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  # Worker - Download & Process
+  # ─── Worker ──────────────────────────────────────────────────────────────────
   worker:
     build:
       context: ./worker
@@ -68,7 +97,22 @@ services:
       MONGODB_URI: mongodb://admin:clipper_secret_2024@mongo:27017/clipper?authSource=admin
       REDIS_URL: redis://redis:6379
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL_ANALYSIS: ${OPENAI_MODEL_ANALYSIS:-gpt-4o-mini}
+      OPENAI_MODEL_FINAL: ${OPENAI_MODEL_FINAL:-gpt-4o}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-4}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-180000}
       STORAGE_PATH: /app/storage
+      CLIP_MIN_SEC: ${CLIP_MIN_SEC:-30}
+      CLIP_MAX_SEC: ${CLIP_MAX_SEC:-90}
+      SUBTITLE_STYLE: ${SUBTITLE_STYLE:-A}
+      SUBTITLE_ENABLED: ${SUBTITLE_ENABLED:-true}
+      ENHANCE_AUDIO: ${ENHANCE_AUDIO:-true}
+      ENHANCE_VIDEO: ${ENHANCE_VIDEO:-true}
+      YTDLP_MAX_RETRIES: ${YTDLP_MAX_RETRIES:-3}
+      YTDLP_RETRY_DELAY_MS: ${YTDLP_RETRY_DELAY_MS:-3000}
+      YTDLP_TIMEOUT_MS: ${YTDLP_TIMEOUT_MS:-300000}
+      YTDLP_COOKIES_PATH: ${YTDLP_COOKIES_PATH:-/app/storage/youtube-cookies.txt}
+      YTDLP_PROXY_URL: ${YTDLP_PROXY_URL:-}
     depends_on:
       - mongo
       - redis
@@ -76,8 +120,9 @@ services:
       - storage_data:/app/storage
     networks:
       - clipper-network
+    logging: *default-logging
 
-  # Frontend (Next.js)
+  # ─── Frontend (Next.js) ──────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -87,12 +132,35 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:5000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5000}
       NODE_ENV: production
     depends_on:
       - api
     networks:
       - clipper-network
+    logging: *default-logging
+
+  # ─── Nginx Reverse Proxy ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: clipper-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - clipper-network
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   mongo_data:

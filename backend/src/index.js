@@ -26,16 +26,19 @@ const PORT = process.env.PORT || 5000;
 connectDB();
 
 // Middlewares
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+// Serve uploaded/rendered files (clips, thumbnails, audio) from storage volume
+app.use('/storage', express.static(process.env.STORAGE_PATH || '/app/storage'));
+
+// Health check (also mounted at /api/health for Docker healthcheck)
+app.get(['/health', '/api/health'], (req, res) => {
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });

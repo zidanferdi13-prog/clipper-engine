@@ -1,6 +1,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const logger = require('../config/logger');
+const { notifyQueue } = require('../config/queue');
 const { Job, Clip } = require('../models');
 const renderService = require('../services/render.service');
 const eventEmitter = require('../services/event-emitter.service');
@@ -32,7 +33,7 @@ class RenderWorker {
   }
 
   async processJob(bullJob) {
-    const { jobId, segment, clipIndex, totalClips, userId } = bullJob.data;
+    const { jobId, segment, clipIndex, totalClips, userId, transcript } = bullJob.data;
 
     try {
       logger.info(`Rendering clip ${clipIndex + 1}/${totalClips} for job ${jobId}`);
@@ -58,38 +59,42 @@ class RenderWorker {
         message: `Rendering clip ${clipIndex + 1}/${totalClips}...`
       });
 
-      // Render clip
+      // Render clip (transcript passed for subtitle generation)
       const result = await renderService.renderClip({
         videoPath: job.metadata.videoUrl,
         segment,
         jobId,
         clipIndex,
-        settings: job.settings
+        settings: job.settings,
+        transcript,
       });
 
       // Create clip in database
       const clip = await Clip.create({
         jobId,
-        title: segment.title,
+        title:       segment.title,
         description: segment.description,
-        start: segment.start,
-        end: segment.end,
-        duration: segment.end - segment.start,
-        score: segment.score,
-        fileUrl: result.clipUrl,
+        start:       segment.start,
+        end:         segment.end,
+        duration:    segment.end - segment.start,
+        score:       segment.score,
+        fileUrl:     result.clipUrl,
         thumbnailUrl: result.thumbnailUrl,
+        subtitleUrl:  result.subtitleUrl || null,
         status: 'completed',
         metadata: {
-          fileSize: result.fileSize,
+          fileSize:   result.fileSize,
           resolution: result.resolution,
-          fps: result.fps
+          fps:        result.fps,
         },
         aiAnalysis: {
-          hookStrength: segment.hookStrength,
-          emotionalTone: segment.emotionalTone,
-          keywords: segment.keywords,
-          category: segment.category
-        }
+          hookStrength:   segment.hookStrength,
+          emotionalTone:  segment.emotionalTone,
+          keywords:       segment.keywords,
+          category:       segment.category,
+          hashtags:       segment.hashtags || [],
+          scoreBreakdown: segment.scoreBreakdown || {},
+        },
       });
 
       logger.info(`Clip ${clipIndex + 1}/${totalClips} rendered for job ${jobId}`);
@@ -118,7 +123,6 @@ class RenderWorker {
         });
 
         // Add to notify queue
-        const { notifyQueue } = require('../../backend/src/config/queue');
         await notifyQueue.add('notify-user', {
           jobId,
           userId,

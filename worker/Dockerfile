@@ -13,7 +13,7 @@ RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Install Node dependencies
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy source code
 COPY . .
@@ -26,5 +26,3 @@ RUN mkdir -p /app/storage/raw \
              /app/storage/temp
 
 CMD ["node", "src/index.js"]
-
-CMD ["npm", "run", "dev"]

@@ -2,66 +2,95 @@
 
 import { useJobProgress } from '../hooks/useJobProgress';
 
+const STATUS_CONFIG = {
+  pending:      { label: 'Pending',      bg: 'rgba(100,116,139,0.2)', color: '#94a3b8', icon: '⏳' },
+  downloading:  { label: 'Downloading',  bg: 'rgba(59,130,246,0.2)',  color: '#60a5fa', icon: '⬇' },
+  transcribing: { label: 'Transcribing', bg: 'rgba(99,102,241,0.2)',  color: '#818cf8', icon: '🎙' },
+  analyzing:    { label: 'Analyzing',    bg: 'rgba(139,92,246,0.2)',  color: '#a78bfa', icon: '🧠' },
+  rendering:    { label: 'Rendering',    bg: 'rgba(234,179,8,0.2)',   color: '#facc15', icon: '🎬' },
+  completed:    { label: 'Completed',    bg: 'rgba(34,197,94,0.2)',   color: '#4ade80', icon: '✅' },
+  failed:       { label: 'Failed',       bg: 'rgba(239,68,68,0.2)',   color: '#f87171', icon: '❌' },
+};
+
+function StatusBadge({ status }) {
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+  return (
+    <span
+      className="px-2.5 py-1 rounded-full text-xs font-semibold"
+      style={{ background: cfg.bg, color: cfg.color }}
+    >
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+}
+
 function JobItem({ job }) {
   const { progress, status, message } = useJobProgress(job._id);
 
-  // Use WebSocket data if available, otherwise use job data
-  const currentProgress = progress || job.progress || 0;
-  const currentStatus = status || job.status;
-  const currentMessage = message;
+  const currentProgress = progress !== null ? progress : (job.progress || 0);
+  const currentStatus   = status  !== null ? status  : job.status;
+  const currentMessage  = message;
+  const errorMessage =
+    typeof job.error === 'string'
+      ? job.error
+      : job.error?.message || null;
 
-  const getStatusColor = (status) => {
-    const colors = {
-      pending: 'bg-gray-200 text-gray-800',
-      downloading: 'bg-blue-200 text-blue-800',
-      transcribing: 'bg-indigo-200 text-indigo-800',
-      analyzing: 'bg-purple-200 text-purple-800',
-      rendering: 'bg-yellow-200 text-yellow-800',
-      completed: 'bg-green-200 text-green-800',
-      failed: 'bg-red-200 text-red-800'
-    };
-    return colors[status] || 'bg-gray-200 text-gray-800';
-  };
+  const progressColor =
+    currentStatus === 'completed' ? '#4ade80' :
+    currentStatus === 'failed'    ? '#f87171' :
+    currentStatus === 'rendering' ? '#facc15' : '#7c3aed';
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition">
-      <div className="flex justify-between items-start">
-        <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900">{job.title || 'Untitled Job'}</h3>
-          <p className="text-sm text-gray-500 mt-1">{job.sourceUrl}</p>
+    <div
+      className="rounded-xl p-4 transition-all"
+      style={{
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="flex justify-between items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+            {job.title || 'Untitled Job'}
+          </h3>
+          <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
+            {job.sourceUrl}
+          </p>
           {currentMessage && (
-            <p className="text-sm text-blue-600 mt-2">{currentMessage}</p>
+            <p className="text-xs mt-1.5" style={{ color: '#818cf8' }}>{currentMessage}</p>
           )}
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(currentStatus)}`}>
-          {currentStatus}
-        </span>
+        <StatusBadge status={currentStatus} />
       </div>
 
       <div className="mt-4">
-        <div className="flex justify-between text-sm text-gray-600 mb-1">
+        <div className="flex justify-between text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
           <span>Progress</span>
-          <span>{currentProgress}%</span>
+          <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{currentProgress}%</span>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-2">
+        <div className="w-full rounded-full h-1.5" style={{ background: 'var(--bg-secondary)' }}>
           <div
-            className="bg-blue-600 h-2 rounded-full transition-all duration-500"
-            style={{ width: `${currentProgress}%` }}
-          ></div>
+            className="h-1.5 rounded-full transition-all duration-500"
+            style={{ width: `${currentProgress}%`, background: progressColor }}
+          />
         </div>
       </div>
 
-      {job.error && (
-        <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
-          {job.error}
+      {errorMessage && (
+        <div
+          className="mt-3 p-3 rounded-lg text-xs"
+          style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171' }}
+        >
+          {errorMessage}
         </div>
       )}
 
       {currentStatus === 'completed' && (
-        <div className="mt-4 flex gap-2">
+        <div className="mt-3">
           <a
-            href={`/jobs/${job._id}`}
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+            href={`/dashboard/clips?jobId=${job._id}`}
+            className="text-xs font-semibold transition-colors"
+            style={{ color: 'var(--accent)' }}
           >
             View Clips →
           </a>
@@ -74,48 +103,40 @@ function JobItem({ job }) {
 export default function JobList({ jobs, loading, onRefresh }) {
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="glass-card p-6">
         <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-          <div className="h-20 bg-gray-200 rounded"></div>
-          <div className="h-20 bg-gray-200 rounded"></div>
+          <div className="h-4 rounded-lg w-1/4" style={{ background: 'var(--bg-secondary)' }} />
+          <div className="h-20 rounded-xl" style={{ background: 'var(--bg-secondary)' }} />
+          <div className="h-20 rounded-xl" style={{ background: 'var(--bg-secondary)' }} />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
+    <div className="glass-card p-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">My Jobs</h2>
+        <div>
+          <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Processing Queue</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{jobs.length} job{jobs.length !== 1 ? 's' : ''}</p>
+        </div>
         <button
           onClick={onRefresh}
-          className="text-blue-600 hover:text-blue-700 font-medium"
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
         >
-          Refresh
+          ↻ Refresh
         </button>
       </div>
 
       {jobs.length === 0 ? (
         <div className="text-center py-12">
-          <svg
-            className="mx-auto h-12 w-12 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No jobs yet</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by creating your first clip job.</p>
+          <div className="text-5xl mb-3">🎬</div>
+          <h3 className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>No jobs yet</h3>
+          <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>Paste a video URL above to create your first job.</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {jobs.map((job) => (
             <JobItem key={job._id} job={job} />
           ))}

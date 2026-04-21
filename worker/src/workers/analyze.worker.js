@@ -1,8 +1,10 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const logger = require('../config/logger');
+const { renderQueue } = require('../config/queue');
 const { Job } = require('../models');
 const aiService = require('../services/ai.service');
+const scoringService = require('../services/scoring.service');
 const eventEmitter = require('../services/event-emitter.service');
 
 class AnalyzeWorker {
@@ -58,28 +60,28 @@ class AnalyzeWorker {
       });
 
       // Analyze transcript with AI
-      const segments = await aiService.analyzeTranscript(
+      const rawSegments = await aiService.analyzeTranscript(
         transcript,
         job.settings.clips
       );
 
-      logger.info(`AI analysis completed for job ${jobId}, found ${segments.length} clips`);
+      // Enhance scores with heuristic viral scoring engine
+      const segments = scoringService.enhanceScores(rawSegments, transcript);
+
+      logger.info(`AI analysis complete for job ${jobId}: ${segments.length} clips, top score ${segments[0]?.score}`);
 
       // Update job progress
-      await Job.findByIdAndUpdate(jobId, {
-        progress: 70
-      });
+      await Job.findByIdAndUpdate(jobId, { progress: 70 });
 
-      // Add render jobs for each segment
-      const { renderQueue } = require('../../backend/src/config/queue');
-      
+      // Add render jobs, passing transcript for subtitle generation
       for (let i = 0; i < segments.length; i++) {
         await renderQueue.add('render-clip', {
           jobId,
-          segment: segments[i],
-          clipIndex: i,
+          segment:    segments[i],
+          clipIndex:  i,
           totalClips: segments.length,
-          userId
+          userId,
+          transcript, // passed to render worker for subtitle generation
         });
       }
 

@@ -2,9 +2,9 @@ const mongoose = require('mongoose');
 
 const clipSchema = new mongoose.Schema({
   jobId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Job',
-    required: true
+    type: String,
+    required: true,
+    index: true
   },
   title: {
     type: String,

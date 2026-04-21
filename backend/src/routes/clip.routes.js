@@ -5,8 +5,9 @@ const authMiddleware = require('../middlewares/auth');
 
 router.use(authMiddleware);
 
-router.get('/:id', clipController.getClipById);
+// NOTE: specific routes must come before param routes (:id catches everything)
 router.get('/by-job/:jobId', clipController.getClipsByJobId);
+router.get('/:id', clipController.getClipById);
 router.delete('/:id', clipController.deleteClip);
 
 module.exports = router;

@@ -13,11 +13,12 @@ const apiLimiter = rateLimit({
 // Auth endpoints rate limit (stricter)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
+  max: process.env.NODE_ENV === 'production' ? 20 : 100,
   message: {
     success: false,
     message: 'Too many authentication attempts, please try again later.'
-  }
+  },
+  skip: (req) => process.env.NODE_ENV !== 'production'
 });
 
 // Job creation rate limit

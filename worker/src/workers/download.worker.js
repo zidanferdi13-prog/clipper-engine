@@ -2,6 +2,7 @@ const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const path = require('path');
 const logger = require('../config/logger');
+const { transcribeQueue } = require('../config/queue');
 const { Job } = require('../models');
 const downloadService = require('../services/download.service');
 const eventEmitter = require('../services/event-emitter.service');
@@ -70,7 +71,6 @@ class DownloadWorker {
       logger.info(`Video downloaded for job ${jobId}`);
 
       // Add to transcribe queue
-      const { transcribeQueue } = require('../../backend/src/config/queue');
       await transcribeQueue.add('transcribe-audio', {
         jobId,
         videoPath: result.videoPath,
