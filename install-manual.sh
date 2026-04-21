@@ -34,12 +34,19 @@ fi
 # Install Python3 and pip (optional, for yt-dlp)
 sudo apt-get install -y python3 python3-pip
 
-# Install MongoDB
-if ! command -v mongod &> /dev/null; then
-  echo "Installing MongoDB..."
-  sudo apt-get install -y mongodb
-  sudo systemctl start mongodb
-  sudo systemctl enable mongodb
+# Install MongoDB via Docker (apt package not available on Raspberry Pi)
+if ! sudo docker ps | grep -q mongo; then
+  echo "Installing MongoDB via Docker..."
+  sudo docker pull mongo:7 --platform linux/arm64
+  sudo docker run -d \
+    --name clipper-mongo \
+    --restart unless-stopped \
+    -p 27017:27017 \
+    -e MONGO_INITDB_ROOT_USERNAME=admin \
+    -e MONGO_INITDB_ROOT_PASSWORD=clipper_secret_2024 \
+    -v clipper_mongo_data:/data/db \
+    mongo:7
+  echo "MongoDB started in Docker container"
 fi
 
 # Install Redis
@@ -48,6 +55,9 @@ if ! command -v redis-server &> /dev/null; then
   sudo apt-get install -y redis-server
   sudo systemctl start redis-server
   sudo systemctl enable redis-server
+else
+  echo "Redis already installed"
+  sudo systemctl start redis-server 2>/dev/null || true
 fi
 
 echo ""
@@ -75,7 +85,17 @@ cd ..
 # Frontend
 cd frontend
 echo "Installing frontend dependencies..."
-npm install
+# Clean node_modules if npm install failed before
+if [ -d "node_modules" ]; then
+  echo "Cleaning corrupted node_modules..."
+  rm -rf node_modules package-lock.json
+fi
+# Retry npm install with verbose logging
+npm install --verbose --legacy-peer-deps || {
+  echo "⚠️  Frontend npm install failed, retrying..."
+  npm cache clean --force
+  npm install --legacy-peer-deps
+}
 cd ..
 
 echo ""
@@ -101,13 +121,15 @@ echo "🔧 Creating systemd services..."
 sudo tee /etc/systemd/system/clipper-backend.service > /dev/null <<EOF
 [Unit]
 Description=AI Clipper Backend API
-After=network.target mongodb.service redis-server.service
+After=network.target docker.service redis-server.service
 
 [Service]
 Type=simple
 User=$USER
 WorkingDirectory=$(pwd)/backend
 Environment=NODE_ENV=production
+Environment=MONGODB_URI=mongodb://admin:clipper_secret_2024@localhost:27017/clipper?authSource=admin
+Environment=REDIS_URL=redis://localhost:6379
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 
@@ -119,7 +141,7 @@ EOF
 sudo tee /etc/systemd/system/clipper-worker.service > /dev/null <<EOF
 [Unit]
 Description=AI Clipper Worker
-After=network.target mongodb.service redis-server.service
+After=network.target docker.service redis-server.service
 
 [Service]
 Type=simple
@@ -127,6 +149,8 @@ User=$USER
 WorkingDirectory=$(pwd)/worker
 Environment=NODE_ENV=production
 Environment=USE_YTDL_CORE=true
+Environment=MONGODB_URI=mongodb://admin:clipper_secret_2024@localhost:27017/clipper?authSource=admin
+Environment=REDIS_URL=redis://localhost:6379
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 
@@ -142,8 +166,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$(pwd)/frontend
+User=$USERdevelopment
+Environment=NEXT_PUBLIC_API_URL=http://localhost:5000
+ExecStart=/usr/bin/npm run dev
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm run start
 Restart=always
@@ -162,7 +187,12 @@ echo ""
 # Build frontend
 echo "🔨 Building frontend..."
 cd frontend
-npm run build
+if [ -f "node_modules/.bin/next" ]; then
+  npm run build
+else
+  echo "⚠️  Next.js not found, skipping build. Frontend will build on first start."
+  echo "You can build manually later with: cd frontend && npm run build"
+fi
 cd ..
 
 echo ""
