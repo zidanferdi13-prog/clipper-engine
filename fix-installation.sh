@@ -22,10 +22,29 @@ sudo docker run -d \
 # Fix 2: Fix frontend npm install
 echo ""
 echo "📦 Fixing frontend dependencies..."
-cd frontend
-rm -rf node_modules package-lock.json
+cd /var/www/clipper-engine/frontend
+
+# Aggressive cleanup
+echo "Removing corrupted node_modules..."
+rm -rf node_modules .next package-lock.json 2>/dev/null || true
+rm -rf /var/www/clipper-engine/node_modules 2>/dev/null || true
+
+# Clean npm cache
 npm cache clean --force
+
+# Fresh install with legacy peer deps
+echo "Installing fresh dependencies..."
 npm install --legacy-peer-deps
+
+if [ $? -eq 0 ]; then
+  echo "✅ Frontend dependencies installed successfully"
+else
+  echo "❌ Frontend npm install failed"
+  echo "Try manual cleanup: sudo rm -rf /var/www/clipper-engine/frontend/node_modules /var/www/clipper-engine/node_modules"
+  exit 1
+fi
+
+cd /var/www/clipper-engine
 
 # Fix 3: Update systemd services with correct MongoDB connection
 echo ""
