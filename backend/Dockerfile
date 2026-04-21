@@ -1,4 +1,9 @@
+# Use ARM64-compatible base image
 FROM node:18-alpine
+
+# Set platform for multi-arch support
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 WORKDIR /app
 

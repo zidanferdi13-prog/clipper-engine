@@ -6,6 +6,7 @@ services:
     image: mongo:7
     container_name: clipper-mongo
     restart: unless-stopped
+    platform: linux/arm64  # ARM64 support
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: clipper_secret_2024
@@ -21,6 +22,7 @@ services:
     image: redis:7-alpine
     container_name: clipper-redis
     restart: unless-stopped
+    platform: linux/arm64  # ARM64 support
     ports:
       - "6379:6379"
     volumes:
@@ -33,8 +35,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      platforms:
+        - linux/arm64  # ARM64 build
     container_name: clipper-api
     restart: unless-stopped
+    platform: linux/arm64
     ports:
       - "5000:5000"
     environment:
@@ -43,6 +48,9 @@ services:
       MONGODB_URI: mongodb://admin:clipper_secret_2024@mongo:27017/clipper?authSource=admin
       REDIS_URL: redis://redis:6379
       JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRES_IN: 1h
+      JWT_REFRESH_SECRET: your-refresh-token-secret-key-change-in-production
+      JWT_REFRESH_EXPIRES_IN: 7d
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     depends_on:
       - mongo
@@ -59,8 +67,11 @@ services:
     build:
       context: ./worker
       dockerfile: Dockerfile
+      platforms:
+        - linux/arm64  # ARM64 build
     container_name: clipper-worker
     restart: unless-stopped
+    platform: linux/arm64
     environment:
       NODE_ENV: development
       MONGODB_URI: mongodb://admin:clipper_secret_2024@mongo:27017/clipper?authSource=admin
@@ -81,8 +92,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      platforms:
+        - linux/arm64  # ARM64 build
     container_name: clipper-frontend
     restart: unless-stopped
+    platform: linux/arm64
     ports:
       - "3000:3000"
     environment:

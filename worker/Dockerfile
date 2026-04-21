@@ -1,11 +1,21 @@
+# Use ARM64-compatible base image
 FROM node:18-alpine
 
+# Set platform for multi-arch support
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
 # Install Python, FFmpeg, yt-dlp, and other dependencies
+# Alpine packages are compiled for the target architecture
 RUN apk add --no-cache \
     python3 \
     py3-pip \
     ffmpeg \
-    && pip3 install yt-dlp openai-whisper
+    gcc \
+    g++ \
+    musl-dev \
+    python3-dev \
+    && pip3 install --no-cache-dir yt-dlp
 
 WORKDIR /app
 
