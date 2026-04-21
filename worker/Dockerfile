@@ -5,23 +5,22 @@ FROM node:18-alpine
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
-# Install Python, FFmpeg, yt-dlp, and other dependencies
-# Alpine packages are compiled for the target architecture
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    ffmpeg \
-    gcc \
-    g++ \
-    musl-dev \
-    python3-dev \
-    && pip3 install --no-cache-dir yt-dlp
-
 WORKDIR /app
+
+# Install system dependencies in SEPARATE steps to reduce memory usage
+# Critical for Raspberry Pi ARM64
+RUN apk add --no-cache python3
+
+RUN apk add --no-cache py3-pip
+
+RUN apk add --no-cache ffmpeg
+
+# Install yt-dlp separately to avoid memory issues
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Install Node dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm install --prefer-offline --no-audit
 
 # Copy source code
 COPY . .
