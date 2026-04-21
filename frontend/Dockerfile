@@ -1,17 +1,29 @@
-# Use ARM64-compatible base image
-FROM node:18-alpine
-
-# Set platform for multi-arch support
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
+# Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
+# Copy source code
 COPY . .
+
+# Build Next.js app
+RUN npm run build
+
+# Production image
+FROM node:18-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV production
+
+# Copy built files
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["node", "server.js"]

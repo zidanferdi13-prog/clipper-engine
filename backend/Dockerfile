@@ -1,19 +1,14 @@
-# Use ARM64-compatible base image
 FROM node:18-alpine
-
-# Set platform for multi-arch support
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
 
 WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci --only=production
 
 # Copy source code
 COPY . .
 
 EXPOSE 5000
 
-CMD ["npm", "run", "dev"]
+CMD ["node", "src/index.js"]

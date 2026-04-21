@@ -2,6 +2,37 @@
 
 AI-powered video clipper yang otomatis memotong video panjang jadi short-form viral clips dengan subtitle AI.
 
+## 🚀 Quick Start (Docker)
+
+### 1. Prerequisites
+- Docker Desktop for Windows
+- OpenAI API Key ([Get here](https://platform.openai.com/api-keys))
+
+### 2. Setup
+
+```bash
+# Clone repository
+git clone https://github.com/zidanferdi13-prog/clipper-engine.git
+cd clipper-engine
+
+# Copy .env and add your OPENAI_API_KEY
+copy .env.example .env
+notepad .env
+
+# Build and run
+docker-compose build
+docker-compose up -d
+```
+
+### 3. Access
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:5000
+
+**See [DOCKER.md](DOCKER.md) for detailed Docker guide**
+
+---
+
 ## 🏗️ Arsitektur
 
 ```
