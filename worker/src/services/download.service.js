@@ -166,11 +166,11 @@ class DownloadService {
       '--sleep-requests', '1',
       '--min-sleep-interval', '1',
       '--max-sleep-interval', '5',
-      '--js-runtimes', 'node',
-      // ios and web clients work without PO Token; android requires GVS PO Token (avoid)
-      '--extractor-args', '"youtube:player_client=ios,web,mweb"',
-      // Permissive selector: best video+audio, fallback to best single file, remux to mp4
-      '-f', '"bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best"',
+      '--no-check-formats',
+      // Download EJS challenge solver scripts from GitHub on first run (needed for YouTube sig/n-challenge)
+      '--remote-components', 'ejs:github',
+      // Prefer mp4+m4a DASH, fall back to any best combo, then single-file best
+      '-f', '"bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"',
       '--merge-output-format', 'mp4',
     ];
 
@@ -199,8 +199,10 @@ class DownloadService {
   isBotProtectionError(stderr) {
     const msg = String(stderr || '').toLowerCase();
     return (
-      msg.includes('sign in to confirm you’re not a bot') ||
-      msg.includes('sign in to confirm you\'re not a bot') ||
+      msg.includes('sign in to confirm') ||
+      msg.includes('sign in to confirm you') ||
+      msg.includes("sign in to confirm you're not a bot") ||
+      msg.includes('use --cookies-from-browser') ||
       msg.includes('use --cookies')
     );
   }
@@ -224,7 +226,12 @@ class DownloadService {
       const lines = stderr.split('\n').map(line => line.trim());
       // Prefer actual ERROR lines over WARNING lines
       const errorLine   = lines.find(l => l.startsWith('ERROR:'));
-      const warningLine = lines.find(l => l.startsWith('WARNING:') && !l.includes('po_token') && !l.includes('PO Token'));
+      const warningLine = lines.find(l =>
+        l.startsWith('WARNING:') &&
+        !l.includes('po_token') &&
+        !l.includes('PO Token') &&
+        !l.includes('JavaScript runtime')
+      );
       const picked = errorLine || warningLine;
       if (picked) return `yt-dlp failed: ${picked}`;
     }

@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const logger = require('../config/logger');
+const scoringService = require('../services/scoring.service');
 
 class AIService {
   constructor() {
@@ -15,40 +16,63 @@ class AIService {
   async analyzeTranscript(transcript, numClips = 5) {
     const MIN_CLIP_SEC = parseInt(process.env.CLIP_MIN_SEC || '30', 10);
     const MAX_CLIP_SEC = parseInt(process.env.CLIP_MAX_SEC || '90', 10);
+    const MAX_AI_CANDIDATES = parseInt(process.env.CLIP_AI_CANDIDATES || `${Math.max(numClips * 6, 18)}`, 10);
 
     try {
       const { fullText, segments } = transcript;
+
+      if (!Array.isArray(segments) || !segments.length) {
+        throw new Error('Transcript segments are missing');
+      }
 
       // Calculate total video duration from last segment
       const totalDuration = segments.length ? segments[segments.length - 1].end : 0;
 
       logger.info(`Analyzing transcript for ${numClips} viral clips (${MIN_CLIP_SEC}s-${MAX_CLIP_SEC}s each, total ${totalDuration.toFixed(0)}s)...`);
 
-      // Build a flattened, easy-to-read segment list with index for AI reference
-      const segmentList = segments.map((s, i) =>
-        `[${i}] ${s.start.toFixed(1)}s-${s.end.toFixed(1)}s: "${s.text.trim()}"`
-      ).join('\n');
+      const candidates = this.buildCandidateWindows(transcript, {
+        minClipSec: MIN_CLIP_SEC,
+        maxClipSec: MAX_CLIP_SEC,
+        maxCandidates: MAX_AI_CANDIDATES,
+      });
+
+      if (!candidates.length) {
+        throw new Error('No clip candidates could be generated from transcript');
+      }
+
+      logger.info(`Prepared ${candidates.length} transcript candidates for AI ranking`);
+
+      const candidateList = candidates.map((candidate) => {
+        const preview = this.toPreviewText(candidate.text, 280);
+        return [
+          `ID ${candidate.id}`,
+          `WINDOW ${candidate.start.toFixed(1)}s-${candidate.end.toFixed(1)}s (${candidate.duration.toFixed(1)}s)`,
+          `HOOK ${candidate.hookStrength}/100`,
+          `HEURISTIC ${candidate.score}/100`,
+          `TEXT: "${preview}"`
+        ].join(' | ');
+      }).join('\n');
 
       const prompt = `Kamu adalah AI expert yang membantu content creator membuat viral short-form video.
 
 VIDEO DURATION: ${totalDuration.toFixed(0)} detik
 
-TRANSKRIP LENGKAP:
+RINGKASAN TRANSKRIP:
 """
-${fullText}
+${this.toPreviewText(fullText, 1800)}
 """
 
-DAFTAR SEGMEN DENGAN TIMESTAMP:
-${segmentList}
+KANDIDAT CLIP TERBAIK DARI SELURUH VIDEO:
+${candidateList}
 
 === TUGAS ===
-Pilih TEPAT ${numClips} clip terbaik dari video ini untuk konten viral (TikTok/Reels/YouTube Shorts).
+Pilih TEPAT ${numClips} clip terbaik dari daftar kandidat di atas untuk konten viral (TikTok/Reels/YouTube Shorts).
 
 === ATURAN DURASI (WAJIB DIPATUHI) ===
 - Setiap clip HARUS berdurasi MINIMUM ${MIN_CLIP_SEC} detik dan MAKSIMUM ${MAX_CLIP_SEC} detik
-- Hitung: durasi = end - start. Jika kurang dari ${MIN_CLIP_SEC}s, perluas ke segmen berikutnya sampai cukup
-- Pilih start dari awal segmen pertama yang dipilih, end dari akhir segmen terakhir yang dipilih
+- Gunakan start/end dari kandidat yang dipilih. Jangan membuat timestamp baru di luar kandidat.
 - DILARANG: end - start < ${MIN_CLIP_SEC} atau end - start > ${MAX_CLIP_SEC}
+- DILARANG memilih kandidat yang overlapping satu sama lain
 
 === KRITERIA CLIP VIRAL ===
 1. **Hook Kuat** - Kalimat pembuka langsung menarik perhatian dalam 3 detik
@@ -63,15 +87,16 @@ Kembalikan JSON object dengan key "clips" berisi array:
 {
   "clips": [
     {
+      "candidateId": <id kandidat yang dipilih>,
       "title": "Judul clickbait menarik (max 60 karakter)",
       "description": "Kenapa clip ini berpotensi viral (1-2 kalimat)",
-      "start": <detik_float, dari timestamp segmen>,
-      "end": <detik_float, dari timestamp segmen, pastikan end-start >= ${MIN_CLIP_SEC}>,
+      "start": <detik_float, harus sama dengan start kandidat>,
+      "end": <detik_float, harus sama dengan end kandidat>,
       "score": <0-100, potensi viral>,
       "hookStrength": <0-100, kekuatan kalimat pembuka>,
       "emotionalTone": "funny|inspiring|shocking|educational|relatable",
       "keywords": ["max 5 keywords"],
-      "category": "business|motivation|comedy|tutorial|story|lifestyle"
+      "category": "business|motivation|comedy|tutorial|story|lifestyle|general"
     }
   ]
 }
@@ -100,50 +125,26 @@ Urutkan clips berdasarkan score tertinggi. Output HANYA JSON, tanpa teks lain.`;
       logger.info('AI analysis response received');
 
       // Parse JSON response
-      let result = JSON.parse(responseText);
-      let clips = Array.isArray(result) ? result : (result.clips || result.segments || []);
-
-      // Validate, sanitize, and ENFORCE duration rules
-      clips = clips.map(clip => {
-        let start = parseFloat(clip.start) || 0;
-        let end   = parseFloat(clip.end)   || 0;
-
-        // Clamp start to valid range
-        start = Math.max(0, Math.min(start, totalDuration));
-
-        // Enforce minimum duration
-        if (end - start < MIN_CLIP_SEC) {
-          end = Math.min(start + MIN_CLIP_SEC, totalDuration);
-        }
-
-        // Enforce maximum duration
-        if (end - start > MAX_CLIP_SEC) {
-          end = start + MAX_CLIP_SEC;
-        }
-
-        // If we couldn't reach min duration (near end of video), push start back
-        if (end - start < MIN_CLIP_SEC && start > 0) {
-          start = Math.max(0, end - MIN_CLIP_SEC);
-        }
-
-        const duration = end - start;
-        logger.info(`Clip "${clip.title}": ${start.toFixed(1)}s → ${end.toFixed(1)}s (${duration.toFixed(1)}s)`);
-
-        return {
-          title:         clip.title         || 'Untitled Clip',
-          description:   clip.description   || '',
-          start,
-          end,
-          score:         Math.min(100, Math.max(0, parseFloat(clip.score)         || 50)),
-          hookStrength:  Math.min(100, Math.max(0, parseFloat(clip.hookStrength)  || 50)),
-          emotionalTone: clip.emotionalTone  || 'neutral',
-          keywords:      Array.isArray(clip.keywords) ? clip.keywords.slice(0, 5) : [],
-          category:      clip.category       || 'general'
-        };
+      const result = this.parseModelJson(responseText);
+      let clips = this.normalizeAiSelection({
+        aiResult: result,
+        candidates,
+        totalDuration,
+        minClipSec: MIN_CLIP_SEC,
+        maxClipSec: MAX_CLIP_SEC,
       });
+
+      if (clips.length < numClips) {
+        logger.warn(`AI returned ${clips.length}/${numClips} valid clips, filling from heuristic candidates`);
+        clips = this.fillMissingClips(clips, candidates, numClips);
+      }
 
       // Remove overlapping clips (keep higher scoring one)
       clips = this.removeOverlapping(clips);
+
+      if (clips.length < numClips) {
+        clips = this.fillMissingClips(clips, candidates, numClips);
+      }
 
       // Sort by score, limit
       clips.sort((a, b) => b.score - a.score);
@@ -155,9 +156,278 @@ Urutkan clips berdasarkan score tertinggi. Output HANYA JSON, tanpa teks lain.`;
 
     } catch (error) {
       logger.error('AI analysis error:', error);
-      logger.warn('Falling back to simple segmentation');
-      return this.fallbackSegmentation(transcript, numClips, MIN_CLIP_SEC);
+      logger.warn('Falling back to heuristic transcript segmentation');
+      return this.fallbackSegmentation(transcript, numClips, MIN_CLIP_SEC, MAX_CLIP_SEC);
     }
+  }
+
+  parseModelJson(responseText = '') {
+    const trimmed = String(responseText || '').trim();
+
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      const match = trimmed.match(/\{[\s\S]*\}/);
+      if (!match) {
+        throw error;
+      }
+
+      return JSON.parse(match[0]);
+    }
+  }
+
+  normalizeAiSelection({ aiResult, candidates, totalDuration, minClipSec, maxClipSec }) {
+    const rawClips = Array.isArray(aiResult) ? aiResult : (aiResult?.clips || aiResult?.segments || []);
+    const candidateMap = new Map(candidates.map(candidate => [candidate.id, candidate]));
+
+    return rawClips.map((clip) => {
+      const candidateId = Number.parseInt(clip.candidateId, 10);
+      const candidate = candidateMap.get(candidateId);
+      let start = candidate ? candidate.start : (parseFloat(clip.start) || 0);
+      let end = candidate ? candidate.end : (parseFloat(clip.end) || 0);
+
+      start = Math.max(0, Math.min(start, totalDuration));
+
+      if (end - start < minClipSec) {
+        end = Math.min(start + minClipSec, totalDuration);
+      }
+
+      if (end - start > maxClipSec) {
+        end = Math.min(start + maxClipSec, totalDuration);
+      }
+
+      if (end - start < minClipSec && start > 0) {
+        start = Math.max(0, end - minClipSec);
+      }
+
+      const duration = end - start;
+      if (duration < minClipSec || duration > maxClipSec) {
+        return null;
+      }
+
+      const clipText = candidate?.text || '';
+      const derivedHookStrength = candidate?.hookStrength || scoringService.quickScore(clipText, duration);
+      const safeScore = candidate
+        ? Math.max(candidate.score, parseFloat(clip.score) || 0)
+        : (parseFloat(clip.score) || 50);
+
+      logger.info(`Clip "${clip.title || candidate?.title || `Candidate ${candidateId || '?'}`}": ${start.toFixed(1)}s -> ${end.toFixed(1)}s (${duration.toFixed(1)}s)`);
+
+      return {
+        title: clip.title || candidate?.title || 'Untitled Clip',
+        description: clip.description || candidate?.description || '',
+        start,
+        end,
+        score: Math.min(100, Math.max(0, safeScore)),
+        hookStrength: Math.min(100, Math.max(0, parseFloat(clip.hookStrength) || derivedHookStrength || 50)),
+        emotionalTone: clip.emotionalTone || candidate?.emotionalTone || 'neutral',
+        keywords: Array.isArray(clip.keywords) ? clip.keywords.slice(0, 5) : (candidate?.keywords || []),
+        category: clip.category || candidate?.category || 'general',
+      };
+    }).filter(Boolean);
+  }
+
+  fillMissingClips(existingClips, candidates, numClips) {
+    const selected = [...existingClips];
+
+    for (const candidate of candidates) {
+      if (selected.length >= numClips) {
+        break;
+      }
+
+      const duplicate = selected.some((clip) =>
+        Math.abs(clip.start - candidate.start) < 0.25 && Math.abs(clip.end - candidate.end) < 0.25
+      );
+
+      if (duplicate) {
+        continue;
+      }
+
+      const overlaps = selected.some((clip) => candidate.start < clip.end && candidate.end > clip.start);
+      if (overlaps) {
+        continue;
+      }
+
+      selected.push({
+        title: candidate.title,
+        description: candidate.description,
+        start: candidate.start,
+        end: candidate.end,
+        score: candidate.score,
+        hookStrength: candidate.hookStrength,
+        emotionalTone: candidate.emotionalTone,
+        keywords: candidate.keywords,
+        category: candidate.category,
+      });
+    }
+
+    return selected;
+  }
+
+  buildCandidateWindows(transcript, options = {}) {
+    const { segments = [] } = transcript || {};
+    const minClipSec = options.minClipSec || 30;
+    const maxClipSec = options.maxClipSec || 90;
+    const maxCandidates = options.maxCandidates || 18;
+
+    if (!segments.length) {
+      return [];
+    }
+
+    const windows = [];
+    let lastSampledStart = -Infinity;
+    const minStartGap = Math.max(10, Math.floor(minClipSec / 2));
+
+    for (let startIndex = 0; startIndex < segments.length; startIndex++) {
+      const startSegment = segments[startIndex];
+      if (!startSegment?.text?.trim()) {
+        continue;
+      }
+
+      if (startSegment.start - lastSampledStart < minStartGap) {
+        continue;
+      }
+
+      let bestWindow = null;
+      let textParts = [];
+
+      for (let endIndex = startIndex; endIndex < segments.length; endIndex++) {
+        const endSegment = segments[endIndex];
+        const duration = endSegment.end - startSegment.start;
+
+        if (duration > maxClipSec + 0.5) {
+          break;
+        }
+
+        if (endSegment.text?.trim()) {
+          textParts.push(endSegment.text.trim());
+        }
+
+        if (duration < minClipSec) {
+          continue;
+        }
+
+        const text = textParts.join(' ').trim();
+        if (!text) {
+          continue;
+        }
+
+        const score = scoringService.quickScore(text, duration);
+        const hookText = this.toPreviewText(text, 140);
+        const hookStrength = scoringService.quickScore(hookText, Math.min(duration, 12));
+        const window = {
+          start: startSegment.start,
+          end: endSegment.end,
+          duration,
+          score,
+          hookStrength,
+          text,
+          title: this.generateFallbackTitle(text, windows.length + 1),
+          description: 'Transcript-picked candidate clip with strong hook and retention signals.',
+          emotionalTone: this.detectEmotionalTone(text),
+          keywords: this.extractKeywords(text),
+          category: this.detectCategory(text),
+        };
+
+        if (!bestWindow || window.score > bestWindow.score || (window.score === bestWindow.score && window.hookStrength > bestWindow.hookStrength)) {
+          bestWindow = window;
+        }
+      }
+
+      if (bestWindow) {
+        windows.push(bestWindow);
+        lastSampledStart = startSegment.start;
+      }
+    }
+
+    windows.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.hookStrength - a.hookStrength;
+    });
+
+    const selected = [];
+    for (const window of windows) {
+      if (selected.length >= maxCandidates) {
+        break;
+      }
+
+      const overlaps = selected.some((candidate) => window.start < candidate.end && window.end > candidate.start);
+      if (overlaps) {
+        continue;
+      }
+
+      selected.push(window);
+    }
+
+    return selected.map((candidate, index) => ({
+      id: index + 1,
+      ...candidate,
+    }));
+  }
+
+  toPreviewText(text = '', maxLength = 240) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+
+    return `${normalized.slice(0, maxLength - 3).trim()}...`;
+  }
+
+  extractKeywords(text = '', maxKeywords = 5) {
+    const stopwords = new Set([
+      'yang', 'dan', 'untuk', 'dengan', 'karena', 'dari', 'this', 'that', 'have', 'your',
+      'about', 'they', 'them', 'kami', 'kamu', 'saya', 'akan', 'atau', 'juga', 'udah',
+      'adalah', 'bisa', 'dalam', 'lebih', 'kalau', 'buat', 'dapat', 'jadi', 'seperti'
+    ]);
+
+    const counts = new Map();
+    for (const word of String(text || '').toLowerCase().match(/[a-z0-9$%]{4,}/g) || []) {
+      if (stopwords.has(word)) {
+        continue;
+      }
+
+      counts.set(word, (counts.get(word) || 0) + 1);
+    }
+
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxKeywords)
+      .map(([word]) => word);
+  }
+
+  detectEmotionalTone(text = '') {
+    const lower = text.toLowerCase();
+
+    if (/(shock|gila|parah|ternyata|plot twist|nggak nyangka|crazy|shocking|unbelievable)/.test(lower)) return 'shocking';
+    if (/(haha|lucu|ketawa|funny|joke|meme| ngakak )/.test(` ${lower} `)) return 'funny';
+    if (/(inspir|motiva|semangat|mindset|success|berhasil|dream)/.test(lower)) return 'inspiring';
+    if (/(gimana|caranya|tutorial|tips|step|rahasia|how to|belajar)/.test(lower)) return 'educational';
+    if (/(gue juga|aku juga|relate|pernah|rasanya|kehidupan|daily|capek)/.test(lower)) return 'relatable';
+
+    return 'neutral';
+  }
+
+  detectCategory(text = '') {
+    const lower = text.toLowerCase();
+
+    if (/(bisnis|business|startup|jualan|marketing|sales|uang|profit|revenue)/.test(lower)) return 'business';
+    if (/(motiva|mindset|discipline|growth|sukses|berhasil)/.test(lower)) return 'motivation';
+    if (/(funny|lucu|joke|komedi|ngakak)/.test(lower)) return 'comedy';
+    if (/(tutorial|tips|step|how to|caranya|belajar)/.test(lower)) return 'tutorial';
+    if (/(story|cerita|pengalaman|kejadian|dulu|waktu itu)/.test(lower)) return 'story';
+    if (/(lifestyle|daily|rutinitas|hidup|kebiasaan)/.test(lower)) return 'lifestyle';
+
+    return 'general';
+  }
+
+  generateFallbackTitle(text = '', index = 1) {
+    const preview = this.toPreviewText(text, 54);
+    if (!preview) {
+      return `Clip ${index}`;
+    }
+
+    return preview;
   }
 
   // Remove clips that overlap — keep higher-score one
@@ -218,32 +488,47 @@ Urutkan clips berdasarkan score tertinggi. Output HANYA JSON, tanpa teks lain.`;
     );
   }
 
-  fallbackSegmentation(transcript, numClips, minSec = 60) {
-    const { segments } = transcript;
+  fallbackSegmentation(transcript, numClips, minSec = 60, maxSec = 90) {
+    const candidates = this.buildCandidateWindows(transcript, {
+      minClipSec: minSec,
+      maxClipSec: maxSec,
+      maxCandidates: Math.max(numClips * 3, 12),
+    });
+
+    const clips = this.fillMissingClips([], candidates, numClips);
+
+    if (clips.length) {
+      logger.info(`Heuristic fallback produced ${clips.length} clips from transcript-wide candidates`);
+      return clips;
+    }
+
+    const { segments = [] } = transcript || {};
     const totalDuration = segments.length ? segments[segments.length - 1].end : 0;
-    const clipDuration  = Math.max(minSec, 60);
-    const clips = [];
+    const clipDuration = Math.max(minSec, 60);
+    const linearFallback = [];
 
     for (let i = 0; i < numClips; i++) {
       const start = i * clipDuration;
       const end = Math.min(start + clipDuration, totalDuration);
 
-      if (start < totalDuration) {
-        clips.push({
-          title: `Clip ${i + 1}`,
-          description: 'Auto-generated clip',
-          start,
-          end,
-          score: 50,
-          hookStrength: 50,
-          emotionalTone: 'neutral',
-          keywords: [],
-          category: 'general'
-        });
+      if (start >= totalDuration) {
+        break;
       }
+
+      linearFallback.push({
+        title: `Clip ${i + 1}`,
+        description: 'Auto-generated clip',
+        start,
+        end,
+        score: 50,
+        hookStrength: 50,
+        emotionalTone: 'neutral',
+        keywords: [],
+        category: 'general'
+      });
     }
 
-    return clips;
+    return linearFallback;
   }
 }
 
